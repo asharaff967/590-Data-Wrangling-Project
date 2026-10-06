@@ -43,6 +43,46 @@ The consumer is a portfolio manager or quant researcher evaluating a systematic 
 * Thin data for less liquid stocks is flagged, not hidden.
 * Raw data is large, so we store derived tables.
 
+## Repository layout
+
+Work is split into areas so each person has their own folder, and the pieces meet only through documented tables.
+
+```
+src/
+  common/        shared config, file helpers, WRDS connection, time helpers, access check
+  earnings/      Compustat and I/B/E/S dates, EDGAR filings, LLM press release extraction
+  integration/   ID crosswalk (OptionMetrics, CRSP, Compustat, I/B/E/S, SEC), database build
+  options/       OptionMetrics pulls (to add)
+  stocks/        CRSP membership and returns (to add)
+tests/<area>/    pytest checks, one folder per area
+data/raw/<area>/        immutable pulls, never committed
+data/processed/<area>/  tables rebuilt by make, never committed
+docs/contracts/  one file per area: output tables, columns, join keys
+docs/ai_log.md   AI workflow log
+config/universe.csv     pilot tickers
+```
+
+How it fits together:
+
+* Each area has `src/<area>/area.mk` with its own make targets. The root `Makefile` includes them, so `make all` rebuilds every area and nobody edits the same lines.
+* CRSP `permno` is the hub key. The integration area holds the crosswalk to every other ID, and areas hand over tables described in `docs/contracts/`.
+* Use one branch per area and merge by pull request.
+
+## Getting started
+
+You need Python 3.10 or newer, git, make, and a WRDS account with Duo. Run everything from the repo root.
+
+1. `cp .env.example .env`, then fill in `WRDS_USERNAME` and `SEC_USER_AGENT` (your name and Duke email).
+2. `make install` creates `.venv` and installs `requirements.txt`.
+3. `make access` checks which WRDS tables open and writes `docs/access_report.md`. The first run asks for your WRDS password and a Duo push.
+4. Earnings area: `make earnings-pull` (WRDS), then `make earnings-build` (offline), and `make earnings-edgar` for EDGAR filings.
+5. Integration area: `make integration-pull` (WRDS), then `make integration-build` (offline). Change the date with `make integration-build AS_OF=2020-01-02`.
+6. `make test` runs the offline tests. `make all` rebuilds every processed table from raw and runs the tests.
+
+Pull targets need a WRDS login and never overwrite existing raw files. Add `--force` through the module (for example `.venv/bin/python -m src.earnings.pull --force`) to replace one on purpose.
+
+Not verified yet: the WRDS table and column names follow the usual WRDS layout but have not been run against a live account. `make access` shows which ones fail.
+
 ## Course requirements
 
 The project is worth 30 percent of the course grade. Full guidelines are in the course materials on Canvas.

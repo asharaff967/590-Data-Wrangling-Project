@@ -1,0 +1,11 @@
+ticker,note
+AAPL,liquid mega cap
+MSFT,liquid mega cap
+JPM,financial
+XOM,energy
+JNJ,health care
+PG,staples
+KO,staples
+WMT,retail
+TSLA,joined the S&P 500 in Dec 2020 so membership dates matter
+META,ticker was FB until 2022 so ticker reuse and renames matter
