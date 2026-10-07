@@ -38,7 +38,8 @@ def prep_compustat(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def prep_ibes(raw: pd.DataFrame) -> pd.DataFrame:
-    out = raw.rename(columns={"oftic": "ticker"}).copy()
+    # Raw I/B/E/S already has its own internal "ticker" column. Use the official ticker, oftic, instead.
+    out = raw.drop(columns=["ticker"], errors="ignore").rename(columns={"oftic": "ticker"}).copy()
     out["ticker"] = out["ticker"].astype(str).str.upper().str.strip()
     out["ibes_period_end"] = _to_ns(out["pends"])
     out["ibes_anndats"] = _to_ns(out["anndats"])
