@@ -10,3 +10,20 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+
+# Stocks pilot/history roots may contain nested raw, processed and audit evidence.
+/data/stocks_*/
+/stocks-history-scripts-v1/
+/stocks-history-scripts-v1.zip
+
+# Local WRDS handoff bundles and notebook execution artifacts are not source.
+/stocks-*.zip
+/pytest-offline-wrds.zip
+**/.ipynb_checkpoints/
+.pgpass
+
+# Audit evidence must stay on WRDS even if copied outside the normal data root.
+**/repro_audits/
+**/quote_analysis_v*/
+**/missing_return_audit_v*/
+**/calendar_audit_v*/

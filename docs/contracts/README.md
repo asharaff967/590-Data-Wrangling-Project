@@ -23,4 +23,4 @@ A contract states, for every table:
 | Earnings | `src/earnings` | [earnings.md](earnings.md) |
 | Integration | `src/integration` | [integration.md](integration.md) |
 | Options | `src/options` | to write |
-| Stocks | `src/stocks` | to write |
+| Stocks | `src/stocks` | [stocks.md](stocks.md) |

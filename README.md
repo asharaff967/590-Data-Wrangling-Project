@@ -53,7 +53,7 @@ src/
   earnings/      Compustat and I/B/E/S dates, EDGAR filings, LLM press release extraction
   integration/   ID crosswalk (OptionMetrics, CRSP, Compustat, I/B/E/S, SEC), database build
   options/       OptionMetrics pulls (to add)
-  stocks/        CRSP membership and returns (to add)
+  stocks/        CRSP pilot pulls, dated membership, quality and history audits
 tests/<area>/    pytest checks, one folder per area
 data/raw/<area>/        immutable pulls, never committed
 data/processed/<area>/  tables rebuilt by make, never committed
@@ -70,6 +70,13 @@ How it fits together:
 
 ## Getting started
 
+For the stocks area, start with the [pilot guide](docs/stocks_pilot.md),
+[table contract](docs/contracts/stocks.md), and
+[repeatable history audit](docs/stocks_history_repro.md).
+The [October 23 WRDS validation summary](docs/stocks_validation_2026-10-23.md)
+reports the ten-stock 2004-2024 run. Licensed data and audit evidence stay on WRDS;
+the repository contains source, fictional tests, and aggregate documentation.
+
 You need Python 3.10 or newer, git, make, and a WRDS account with Duo. Run everything from the repo root.
 
 1. `cp .env.example .env`, then fill in `WRDS_USERNAME` and `SEC_USER_AGENT` (your name and Duke email).
@@ -81,7 +88,7 @@ You need Python 3.10 or newer, git, make, and a WRDS account with Duo. Run every
 
 Pull targets need a WRDS login and never overwrite existing raw files. Add `--force` through the module (for example `.venv/bin/python -m src.earnings.pull --force`) to replace one on purpose.
 
-Not verified yet: the WRDS table and column names follow the usual WRDS layout but have not been run against a live account. `make access` shows which ones fail.
+Verification is area-specific. The stocks pilot's required CRSP tables were checked on WRDS in the [October 23 validation](docs/stocks_validation_2026-10-23.md). Check the relevant area report and run `make access` for your own account; this result does not establish access to every project's source.
 
 ## Course requirements
 
