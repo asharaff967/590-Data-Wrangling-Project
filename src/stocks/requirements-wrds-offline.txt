@@ -1,0 +1,18 @@
+# Validated OFFLINE stocks-test profile; not shared project requirements.
+# Runtime tested: CPython 3.14.5, Linux x86_64, glibc 2.34.
+# Latest tested code: 0e6648d779e2143309aac0d448621fcbe05d8b32.
+# Use only in a fresh isolated venv; never upgrade WRDS-managed packages.
+# Install from a verified offline wheelhouse with --no-index.
+# Does not include the WRDS client or validate live pulls/other team modules.
+# requirements-tested.txt remains the historical Python 3.11 profile.
+# Evidence and limitations: docs/stocks_warning_review.md.
+pandas==3.0.1
+numpy==2.4.6
+python-dateutil==2.9.0.post0
+six==1.17.0
+pytest==9.1.1
+pluggy==1.7.0
+packaging==26.3
+iniconfig==2.3.1
+Pygments==2.21.0
+colorama==0.4.6

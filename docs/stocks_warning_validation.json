@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "scope": "Isolated offline stocks validation; no shared dependency migration",
+  "branch": "loki/stocks-pilot-audit",
+  "tested_commit": "0e6648d779e2143309aac0d448621fcbe05d8b32",
+  "source_only_zip_sha256": "d000e53f839fc50587484dacdeca303995c46d009a5a1efd48568a064c22bf09",
+  "source_package_manifest_sha256": "3a8c91b81df813bf33a0cda7c9dece9fecb481658669d035d6fdde384f0e525b",
+  "local_control": {
+    "profile": "local-control",
+    "python": "3.11.9",
+    "platform": "Windows-10-10.0.26300-SP0",
+    "base_commit": "0e6648d779e2143309aac0d448621fcbe05d8b32",
+    "collected": 51,
+    "passed": 51,
+    "failures": [],
+    "pytest_warning_count": 0,
+    "pytest_exit_code": 0,
+    "process_exit_code": 0,
+    "stderr_present": false,
+    "provenance_rejection_test_passed": true,
+    "source_package_unchanged": true,
+    "source_package_manifest_sha256": "3a8c91b81df813bf33a0cda7c9dece9fecb481658669d035d6fdde384f0e525b",
+    "real_data_or_old_audits_accessed": false,
+    "evidence_origin": "Agent-executed independent local source copy",
+    "packages": {
+      "pandas": "2.2.3",
+      "numpy": "2.4.6",
+      "python-dateutil": "3.0.0",
+      "six": "1.17.0",
+      "pytest": "9.1.1",
+      "pluggy": "1.7.0",
+      "packaging": "26.3",
+      "iniconfig": "2.3.1",
+      "Pygments": "2.21.0",
+      "colorama": "0.4.6"
+    }
+  },
+  "wrds_latest": {
+    "profile": "wrds-candidate",
+    "python": "3.14.5",
+    "platform": "Linux-5.14.0-687.60.1.el9_8.x86_64-x86_64-with-glibc2.34",
+    "base_commit": "0e6648d779e2143309aac0d448621fcbe05d8b32",
+    "collected": 51,
+    "passed": 51,
+    "failures": [],
+    "pytest_warning_count": 0,
+    "pytest_exit_code": 0,
+    "process_exit_code": 0,
+    "stderr_present": false,
+    "provenance_rejection_test_passed": true,
+    "source_package_unchanged": true,
+    "source_package_manifest_sha256": "3a8c91b81df813bf33a0cda7c9dece9fecb481658669d035d6fdde384f0e525b",
+    "real_data_or_old_audits_accessed": false,
+    "evidence_origin": "Loki executed the packaged runner and supplied console output; not independently rerun by agent",
+    "packages_enforced_by_runner": {
+      "pandas": "3.0.1",
+      "numpy": "2.4.6",
+      "python-dateutil": "2.9.0.post0",
+      "six": "1.17.0",
+      "pytest": "9.1.1",
+      "pluggy": "1.7.0",
+      "packaging": "26.3",
+      "iniconfig": "2.3.1",
+      "Pygments": "2.21.0",
+      "colorama": "0.4.6"
+    },
+    "package_evidence": "Runner asserts installed versions equal the pinned manifest before tests; remote receipt not downloaded",
+    "remote_run_id": "latest_stocks_test_pzb7evwd"
+  },
+  "older_snapshot": {
+    "evidence_origin": "User-executed WRDS cells, outputs supplied in conversation; not remotely re-executed by agent",
+    "source_archive_sha256": "c1966a3a4b6b144a992104458ce612f88f03a71c57a9128f3c2a1356c5101543",
+    "source_scope": "October 28 source snapshot; excludes the latest raw-manifest provenance guard",
+    "original_runtime": {
+      "python": "3.14.5",
+      "pandas": "2.2.3",
+      "numpy": "2.4.6",
+      "python-dateutil": "2.8.2"
+    },
+    "minimal_probe": {
+      "original_import_warnings": 1,
+      "original_assignment_warnings": 1,
+      "candidate_import_warnings": 0,
+      "candidate_assignment_warnings": 0,
+      "correct_output_both": true,
+      "input_unchanged_both": true
+    },
+    "old_snapshot_candidate_tests": {
+      "passed": 50,
+      "exit_code": 0,
+      "warning_summary_reported": false,
+      "source_files_unchanged": true
+    },
+    "fictional_equivalence": {
+      "csv_tables_byte_identical": 12,
+      "quality_report_equal": true,
+      "quality_summary_equal": true,
+      "fixture_rows": 4,
+      "scope": "one fictional integration fixture"
+    },
+    "old_snapshot_saved_data_readonly": {
+      "rows": 49107,
+      "securities": 10,
+      "window": [
+        "2004-01-01",
+        "2024-12-31"
+      ],
+      "csv_tables_compared": 8,
+      "input_check": "pass",
+      "evidence_check": "pass",
+      "calendar_status": "pass",
+      "quality_status": "documented_with_usage_restrictions",
+      "connection_opened": false,
+      "files_written": false,
+      "saved_files_unchanged": true
+    }
+  },
+  "interpretation": {
+    "supported": "Pinned candidate passed the tested latest stocks offline suite without reported warnings",
+    "latest_source_saved_data_check": "not performed; saved-data result belongs to the older source snapshot",
+    "live_wrds_client_compatibility": "not tested",
+    "other_team_modules_on_pandas_3": "not tested",
+    "vendor_data_independently_validated": false,
+    "shared_dependencies_replaced": false,
+    "old_manifests_rewritten": false
+  }
+}

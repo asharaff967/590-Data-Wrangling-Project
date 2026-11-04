@@ -276,3 +276,21 @@ Local release validation passed 68 repository tests (51 stocks tests) on
 Python 3.11.9 / pandas 2.2.3 without warning suppression. Twelve fictional
 build/audit CSVs and the quality summary match the original branch, and all six
 extracted check function bodies retain identical syntax trees.
+
+
+## Subsequent isolated dependency validation
+
+The warning investigation above describes the status at that earlier review.
+It has since completed for the tested offline stocks scope: commit
+0e6648d779e2143309aac0d448621fcbe05d8b32 passes 51 stocks tests with zero
+pytest warnings and empty stderr on the isolated WRDS Python 3.14.5 /
+pandas 3.0.1 profile. The new raw-manifest rejection test passes and the source
+package is unchanged. Local Python 3.11.9 / pandas 2.2.3 also passes all 51 tests.
+
+See [the warning review](stocks_warning_review.md) and its linked evidence JSON
+for exact dependency versions and separate local versus user-run evidence.
+The prior 49,107-row/eight-table read-only check used the October 28 source;
+it does not validate the latest provenance guard against actual saved data.
+Latest-source tests used fictional data only. Existing source/audit manifests
+retain their original runtime and code identities. Shared dependencies and real
+data are unchanged; no additional real-data rebuild or audit is implied.

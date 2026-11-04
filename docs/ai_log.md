@@ -187,3 +187,32 @@ We reviewed, understand and can defend everything in this repository.
 * Publication scope: ten reviewed text files on loki/stocks-pilot-audit, authorized
   by Loki on November 4. AI assisted review and preparation. Student review of
   the implementation remains necessary before integration into the group main.
+
+
+## Completed isolated stocks warning validation and teammate review
+
+* Supported: prepared hash-verified offline dependencies and source copies;
+  guided Loki through exact-runtime reproduction, old-source regression,
+  fictional equivalence, saved-data read-only comparison and latest-source tests.
+  Recorded dependency pins and source/hash scope without editing old evidence.
+* Failed/limits: the online download failed because WRDS could not reach PyPI,
+  not because the verified wheel tags were incompatible. Old 50-test results
+  initially did not cover the latest raw-manifest guard. A separate 51-test run
+  now covers it. Full remote receipts were not downloaded; WRDS outcomes are
+  explicitly user-reported. Live-client and other-team-module compatibility are
+  not established by offline stocks tests.
+* Extended: latest commit 0e6648d passes all 51 stocks tests locally and in the
+  user-run WRDS candidate environment, with zero pytest warnings, empty stderr,
+  a passing provenance-rejection test and unchanged source package. Earlier
+  twelve-CSV equivalence and 49,107-row/eight-table saved-data results remain
+  attributed to the older source snapshot.
+* Preparation scope: these dependency/documentation records were first prepared
+  as uncommitted working-tree changes for Loki's review. No business logic/test
+  changes, warning suppression, shared dependency replacement, real-data rewrite
+  or audit rewrite was performed.
+* Publication authorization: Loki subsequently requested a final review and
+  commit/push of exactly these five files to loki/stocks-pilot-audit for teammate
+  review. This publication excludes main, any merge, real data and old audits.
+  AI assisted the review and commit preparation under Loki's explicit instruction.
+  Existing test evidence remains attributed to tested commit 0e6648d; this
+  documentation/dependency-record update does not change the tested Python code.

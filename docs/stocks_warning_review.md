@@ -1,24 +1,80 @@
-# Stocks warning investigation
+# Stocks warnings: isolated dependency validation
 
-Scope: the October 28 investigation of Group 2 stocks code and its WRDS test
-environment. That investigation applied no warning fix, global warning filter
-or dependency install. This note accompanies the November 4 branch review;
-the exact-runtime probe and compatibility fix are still pending.
+The pinned Python 3.14 offline stocks profile passes the latest tested stocks
+suite with warnings enabled. This is a stocks-only validation, not a migration
+of the shared project environment. No business logic or tests changed to remove
+warnings. The opt-in legacy warning filter was not used.
 
-## Observed counts
+Tested branch: `loki/stocks-pilot-audit` at
+`0e6648d779e2143309aac0d448621fcbe05d8b32`.
+Machine-readable evidence: [stocks_warning_validation.json](stocks_warning_validation.json).
 
-The user-provided WRDS test output reports 50 passed, 578 warnings, exit code 0.
-577 FutureWarnings arise at 12 locations in src/stocks/quality.py. Those locations
-are single-step assignments to explicitly copied frames, not df[column][row]
-assignments. One DeprecationWarning originates in dateutil/tz/tz.py during import,
-where the installed dependency calls datetime.utcfromtimestamp(0).
+## What caused the investigation
 
-The aggregate count is repeated events across tests, not 578 independent defects.
-The reference-count condition in the locally inspected pandas 2.2.3
-DataFrame.__setitem__ can warn when an object appears to be temporary and its
-blocks have references. Python 3.14 changes this reference-count assumption.
+The original WRDS run reported 50 passed and 578 warnings: 577 repeated pandas
+FutureWarnings at 12 single-step assignment sites and one dateutil import
+DeprecationWarning. These were not 578 separate code defects. Python 3.14.5 /
+pandas 2.2.3 / dateutil 2.8.2 reproduced both warning categories in a minimal
+copied-frame assignment test, with correct output and unchanged input.
 
-## Primary-source findings
+The isolated Python 3.14.5 / pandas 3.0.1 / NumPy 2.4.6 /
+dateutil 2.9.0.post0 environment produced zero warnings in the same probe.
+This supports an environment-level remedy for the observed warnings; it is not
+proof that arbitrary assignments or every pandas 3 workflow are compatible.
+
+## Verification, with source scopes kept separate
+
+| Source and check | Runtime | Result |
+|---|---|---|
+| October 28 source, original suite | WRDS Python 3.14.5, pandas 2.2.3 | 50 passed; 578 warnings |
+| Same old source, candidate suite | WRDS Python 3.14.5, pandas 3.0.1 | 50 passed; no warning summary |
+| Same old source, one four-row fictional fixture | Original versus candidate WRDS environment | 12 CSVs byte-identical; quality report and summary equal |
+| Same old source, saved-data read-only check | Candidate WRDS environment | 49,107 rows, 10 securities, 8 audit CSVs matched; files unchanged |
+| Latest tested commit, stocks suite | Local Windows Python 3.11.9, pandas 2.2.3 | 51 passed; 0 pytest warnings; empty stderr |
+| Latest tested commit, stocks suite | WRDS Python 3.14.5, pandas 3.0.1 | 51 passed; 0 pytest warnings; empty stderr |
+
+The latest suite includes the additional test rejecting a saved audit whose raw
+manifest hash differs. It passed in both environments; the source package was
+unchanged. The latest WRDS run used fictional fixtures only and did not read
+real data or old audits. Its warnings were enabled and recorded, not ignored.
+
+Local results were executed by the agent in an independent source copy. WRDS
+results were executed by Loki using prepared cells, then supplied in chat. The
+full latest remote receipt/logs remain in run `latest_stocks_test_pzb7evwd`.
+The runner checked all pinned installed versions before running tests. Its
+complete remote receipt has not been downloaded or independently rerun here.
+
+The saved-data comparison belongs to the OLD source snapshot. It is not a
+latest-source real-data check, a new vendor query or independent human arithmetic
+verification. Its quality_status remains `documented_with_usage_restrictions`.
+
+## Dependency use and preservation
+
+[requirements-wrds-offline.txt](../src/stocks/requirements-wrds-offline.txt)
+records the exact validated offline profile for CPython 3.14.5 on Linux x86_64
+with glibc 2.34. It includes test dependencies; it excludes the live WRDS client.
+Use it only in a fresh isolated venv. For an offline installation, supply a
+previously hash-verified wheelhouse and run that venv's Python, for example:
+
+```sh
+"$VENV/bin/python" -I -B -m pip --isolated --disable-pip-version-check --no-cache-dir install --no-index --only-binary=:all: --find-links "$WHEELHOUSE" -r src/stocks/requirements-wrds-offline.txt
+```
+
+The pins are a version record, not a replacement for wheel checksum validation.
+Do not combine this profile with `requirements-tested.txt`: that file preserves
+the older local Python 3.11 profile. Shared root requirements and WRDS-managed
+packages remain unchanged. Other team modules and live pulls have not been
+validated under this profile.
+
+Keep the tested ZIP, its hash manifest, old raw/processed data and audit manifests
+unchanged. Recomputing an audit without `--check-only` writes a new directory;
+`build` can replace processed outputs. Neither is part of this review.
+New version information belongs in new validation records, never in old audits.
+
+The requested warning investigation and latest fictional regression review are
+complete. Adoption by the group or any later data operation is a separate step.
+
+## Primary-source findings retained from the earlier investigation
 
 * https://github.com/pandas-dev/pandas/issues/61368 documents Python 3.14
   false positives for ordinary single-step assignments, including pandas 2.2.3.
@@ -30,22 +86,3 @@ blocks have references. Python 3.14 changes this reference-count assumption.
 * https://github.com/dateutil/dateutil/issues/1284 identifies the import-time
   utcfromtimestamp deprecation. The dateutil changelog records its removal in
   version 2.9.0: https://dateutil.readthedocs.io/en/stable/changelog.html.
-
-## Current decision
-
-Do not mechanically rewrite every assignment as .loc and do not ignore the
-warnings. First reproduce a single-step copied-frame assignment in a fresh WRDS
-subprocess and record the actual loaded pandas/dateutil versions and paths.
-The leading hypothesis is an environment compatibility issue, pending that
-exact-runtime probe. A local Python 3.11.9 / pandas 2.2.3 / dateutil 3.0.0 control
-produced correct output, preserved its input and emitted no warnings.
-
-If confirmed, test a compatible dependency combination in a separate environment,
-then rerun fictional tests and compare the saved analysis without changing the
-old data root or managed WRDS packages. General Python support does not guarantee
-that any proposed upgrade preserves all dtypes, date handling and output bytes.
-Do not monkeypatch pandas internals or add extra references merely to defeat its
-warning detector. No dependency or business-rule change is validated yet.
-
-The 50 passing tests and the earlier eight-table read-only comparison remain
-positive evidence for current behavior; they do not prove future compatibility.
