@@ -1,5 +1,7 @@
 # Reproducible stocks history audits on WRDS
 
+For the current preservation-only review, first follow [the rebuild and retention policy](stocks_rebuild_policy.md). Use --check-only throughout; the live and writing-replay examples below are for a separately authorized later run.
+
 Run from the course repository root. This stage uses the existing immutable raw
 pull and existing processed `stock_daily.csv`. It does **not** call the older
 build stage (which replaces processed tables). It does not execute Git commands.
@@ -172,3 +174,105 @@ See [the aggregate validation summary](stocks_validation_2026-10-23.md) for
 comparison scope and limitations. The actual manifests, comparison records,
 source evidence and market rows remain on WRDS. These counts describe one
 verified run; they are not assertions built into the audit algorithm.
+
+
+## Stocks code cleanup on October 28 2026
+
+The `loki/stocks-pilot-audit` code now separates three responsibilities:
+
+* `src/stocks/raw_inputs.py` validates the raw manifest, file set, checksums and
+  row counts for both build and history audit, and attaches annual CSV row provenance.
+* `src/stocks/history_checks.py` contains dataframe-only quote, return and calendar
+  checks; it performs no file writes or WRDS queries.
+* `src/stocks/history_audit.py` keeps input correspondence checks, evidence retrieval,
+  replay, non-overwriting run management and the existing CLI.
+
+Existing imports from `history_audit` and all Make/notebook commands remain
+available. Pure check function bodies were moved without changing their syntax
+trees. The existing quality/membership rules, SQL and pull code are unchanged.
+The opt-in known-warning filter includes the new module names so it retains its
+previous narrow scope after the move; it is still not a pandas compatibility fix.
+
+Local verification used fictional data only on Python 3.11.9 / pandas 2.2.3 /
+NumPy 2.4.6. All 38 original stocks tests pass. Six new tests cover corrupt
+manifests reaching both consumers and annual-file CSV line provenance. The full
+repository suite passes 61 tests. Twelve build/audit CSVs are byte-identical before
+and after the cleanup; quality_summary.json is also identical. The build report
+matches after excluding its deliberately changed source-code hashes. New runtime
+and code hashes identify new executions; old audit manifests remain snapshots.
+
+No live WRDS pull, real-data build or historical-source revalidation was performed.
+No existing data or audit directory was opened or changed. Other team areas and
+shared common code are unchanged. At that stage, this was a local, uncommitted cleanup for student review.
+See the November 4 release review below for subsequent authorization.
+
+
+## Read-only saved-audit comparison added on October 28 2026
+
+`--check-only` retains its original input-validation fields and writes no files.
+It now also verifies the saved file inventory/hashes are unchanged during the
+check. Add `--evidence-dir` for a completed run under this exact window's
+`repro_audits` to verify all output hashes and compare eight recomputed CSV tables
+and the quality summary in memory. The current calculation is shared with the
+writing audit, so there is no duplicate financial/checking implementation.
+
+Without `--check-only`, an evidence-dir replay still writes a NEW audit directory;
+it is outside the current read-only scope. Build behavior remains unchanged and
+must be used only in a separately prepared rebuild workspace.
+
+Local validation: 67 offline tests pass. Tests forbid filesystem writes, build/run
+and query calls during both read-only modes. Altered saved tables fail even when
+someone updates their recorded hash. Twelve fictional build/audit CSVs and the
+quality summary still match the original branch output. WRDS execution was pending
+at packaging time; see the user-run verification below. No historical count is a
+hardcoded target.
+
+
+## User-run WRDS read-only verification on October 28 2026
+
+Loki ran the source-only review package in a separate WRDS code directory and
+provided the terminal/JSON outputs in chat. The review archive SHA-256 was
+c1966a3a4b6b144a992104458ce612f88f03a71c57a9128f3c2a1356c5101543.
+At that verification, local Python sources matched the package. The November 4
+provenance guard described below is a later change and is not in that archive.
+
+* Runtime: Python 3.14.5, pandas 2.2.3, NumPy 2.4.6, offline pytest 9.1.1.
+* Fictional stocks suite: 50 passed, 578 warnings, exit code 0. Warnings remain
+  recorded; their causes have not been independently established or fixed.
+* Input-only check: 49,107 rows, 10 securities, 2004-01-01 through 2024-12-31;
+  input_check pass, no connection, no writes, saved files unchanged, exit code 0.
+* Saved run: history_script_20261023T171337Z_7da30e, beneath that window's
+  repro_audits directory. Check-only comparison reported evidence_check pass,
+  eight CSV tables compared, calendar_status pass, saved files unchanged and
+  exit code 0. The implementation also compares the saved quality summary.
+* quality_status remains documented_with_usage_restrictions. Matching saved
+  outputs does not remove quote exceptions or independently validate vendor
+  records, corporate actions or an exchange trading calendar.
+
+Only aggregate outputs were provided locally. Real input rows, raw quotations
+and saved audit evidence remain on WRDS. No live source query, new real-data
+build/audit output, PBIX modification, commit, push or merge was performed.
+This records human execution of AI-prepared software checks, not an independent
+human arithmetic audit. Source/code and analytical consistency are the scope.
+
+
+## Branch release review on November 4 2026
+
+Loki authorized review and publication of these ten stocks-area files to
+loki/stocks-pilot-audit for teammate review. The publication covers the shared
+raw validation, extracted checks, read-only comparison, tests and documentation.
+
+The read-only comparison now also checks that the saved audit's raw-manifest
+hash matches the current processed report. This prevents accepting an audit
+from a different raw snapshot even when its stock CSV and calculated values
+agree. A fictional regression case exercises this rejection and verifies that
+the saved files remain unchanged.
+
+The October 28 WRDS results above apply to the earlier review package. This
+additional provenance guard has local fixture coverage and has not been rerun
+against the real WRDS snapshot. The 578 WRDS warnings remain under investigation.
+
+Local release validation passed 68 repository tests (51 stocks tests) on
+Python 3.11.9 / pandas 2.2.3 without warning suppression. Twelve fictional
+build/audit CSVs and the quality summary match the original branch, and all six
+extracted check function bodies retain identical syntax trees.

@@ -8,43 +8,18 @@ from pathlib import Path
 
 import pandas as pd
 
-from .pull import data_root, raw_folder, sha256, window
+from .pull import data_root, sha256, window
 from .quality import audit_daily
+from .raw_inputs import daily_source_rows, read_raw_run
 
 
 def build(root, start, end):
     start, end = window(start, end)
-    folder = raw_folder(root, start, end)
+    folder, manifest, frames = read_raw_run(root, start, end)
     manifest_path = folder / "manifest.json"
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Missing {manifest_path}; run stocks-pull first")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("status") != "complete":
-        raise ValueError("Raw run is incomplete; inspect the pull error before building")
-    if (manifest["start"], manifest["end"]) != (start, end):
-        raise ValueError("Manifest dates do not match requested window")
-    daily_files = [f"daily_{year}.csv" for year in range(int(start[:4]), int(end[:4]) + 1)]
-    expected = {"seed_names.csv", "pilot_securities.csv", "names.csv", "membership.csv", *daily_files}
-    entries = manifest["files"]
-    if len(entries) != len(expected) or {entry["name"] for entry in entries} != expected:
-        raise ValueError("Manifest is missing required files or contains duplicates/unexpected files")
-    frames = {}
-    for entry in entries:
-        path = folder / entry["name"]
-        if sha256(path) != entry["sha256"]:
-            raise ValueError(f"Raw checksum mismatch: {path}")
-        frame = pd.read_csv(path)
-        if len(frame) != entry["rows"]:
-            raise ValueError(f"Raw row count mismatch: {path}")
-        frames[entry["name"]] = frame
-    daily = []
-    for name in daily_files:
-        frame = frames[name].copy()
-        frame["source_file"] = name
-        frame["source_row"] = range(2, len(frame) + 2)
-        daily.append(frame)
+    daily = daily_source_rows(frames, start, end)
     pilot = frames["pilot_securities.csv"]
-    out = audit_daily(pd.concat(daily, ignore_index=True), frames["names.csv"],
+    out = audit_daily(daily, frames["names.csv"],
                       frames["membership.csv"], pilot, start, end)
     counts = Counter(code for codes in out["core_flags"] for code in codes.split(";") if code)
     diagnostics = Counter(code for codes in out["diagnostic_flags"] for code in codes.split(";") if code)

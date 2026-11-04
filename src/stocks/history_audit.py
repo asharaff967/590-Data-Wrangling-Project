@@ -6,9 +6,9 @@ Fetch evidence on WRDS once; replay using that saved evidence without a connecti
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 from datetime import datetime, timezone
 import json
+from io import StringIO
 from pathlib import Path
 import platform
 import re
@@ -20,9 +20,14 @@ import pandas as pd
 from ..common.io_utils import sql_list
 from .pull import data_root, raw_folder, sha256, window
 from .quality import numeric, require
+from .raw_inputs import daily_source_rows, read_raw_run
+# Keep these imports public for existing notebooks and downstream callers.
+from .history_checks import (
+    RETURN_CODES, calendar_audit, flag_counts, quote_analysis, return_audit,
+    return_missing, validate_evidence,
+)
 
 VERSION = "1"
-RETURN_CODES = [-44, -55, -66, -77, -88, -99]
 CALENDAR_SQL = """SELECT date AS trading_date FROM crsp.dsi
 WHERE date BETWEEN %(start)s AND %(end)s ORDER BY date"""
 
@@ -42,33 +47,11 @@ def unchanged(hashes):
             raise ValueError(f"Existing file changed during audit: {name}")
 
 
-def flag_counts(series):
-    return dict(sorted(Counter(
-        code for value in series.fillna("") for code in str(value).split(";") if code
-    ).items()))
-
-
 def load_inputs(root, start, end):
     """Check immutable raw hashes and processed row correspondence before querying."""
-    raw = raw_folder(root, start, end)
+    raw, manifest, frames = read_raw_run(root, start, end)
     processed = Path(root) / "processed" / "stocks" / f"{start}_{end}"
     manifest_path = raw / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("status") != "complete" or (manifest["start"], manifest["end"]) != (start, end):
-        raise ValueError("Raw manifest is incomplete or has different dates")
-    daily_names = [f"daily_{y}.csv" for y in range(int(start[:4]), int(end[:4]) + 1)]
-    expected = {"seed_names.csv", "pilot_securities.csv", "names.csv", "membership.csv", *daily_names}
-    entries = manifest["files"]
-    if len(entries) != len(expected) or {e["name"] for e in entries} != expected:
-        raise ValueError("Unexpected raw manifest file set")
-    frames = {}
-    for entry in entries:
-        path = raw / entry["name"]
-        if sha256(path) != entry["sha256"]:
-            raise ValueError(f"Raw checksum mismatch: {path}")
-        frames[entry["name"]] = pd.read_csv(path)
-        if len(frames[entry["name"]]) != entry["rows"]:
-            raise ValueError(f"Raw row count mismatch: {path}")
     pilot = frames["pilot_securities.csv"]
     require(pilot, ["permno", "pilot_ticker"], "pilot")
     ids = numeric(pilot["permno"])
@@ -79,10 +62,7 @@ def load_inputs(root, start, end):
     daily = pd.read_csv(processed / "stock_daily.csv")
     require(daily, ["permno", "date", "ret", "retx", "pilot_ticker", "core_flags",
                     "diagnostic_flags", "source_file", "source_row"], "processed daily")
-    source = pd.concat([
-        frames[name].assign(source_file=name, source_row=range(2, len(frames[name]) + 2))
-        for name in daily_names
-    ], ignore_index=True)
+    source = daily_source_rows(frames, start, end)
     # CSV round trips can differ in the last floating-point digits, not economically.
     pd.testing.assert_frame_equal(daily[source.columns], source, check_dtype=False,
                                   check_exact=False, rtol=1e-12, atol=1e-12)
@@ -126,112 +106,6 @@ def fetch_evidence(db, pilot, start, end):
     return calendar, coverage, metadata
 
 
-def validate_evidence(calendar, coverage, pilot, start, end):
-    require(calendar, ["trading_date"], "calendar")
-    days = pd.to_datetime(calendar["trading_date"], errors="raise")
-    if days.empty or days.isna().any() or days.duplicated().any() or not days.between(start, end).all() or days.dt.dayofweek.ge(5).any():
-        raise ValueError("Calendar is empty, invalid, duplicated, outside the window or contains weekends")
-    require(coverage, ["permno", "first_date", "last_date", "window_rows", "first_ret", "first_retx"], "source coverage")
-    if coverage["permno"].duplicated().any() or set(coverage["permno"]) != set(pilot["permno"]):
-        raise ValueError("Source coverage must contain exactly one row per pilot permno")
-    lo, hi = (pd.to_datetime(coverage[c], errors="raise") for c in ["first_date", "last_date"])
-    counts = numeric(coverage["window_rows"])
-    if lo.isna().any() or hi.isna().any() or lo.gt(hi).any() or (counts.isna() | counts.lt(0) | counts.mod(1).ne(0)).any():
-        raise ValueError("Invalid source coverage bounds or counts")
-
-
-def quote_analysis(daily):
-    empty = pd.Series(float("nan"), index=daily.index)
-    bid, ask = (numeric(daily[c]) if c in daily else empty for c in ["bid", "ask"])
-    positive = bid.notna() & ask.notna() & bid.gt(0) & ask.gt(0)
-    normal, locked, crossed = positive & bid.lt(ask), positive & bid.eq(ask), positive & bid.gt(ask)
-    status = pd.Series("INVALID_OR_MISSING", index=daily.index, dtype="string")
-    status = status.mask(normal, "NORMAL").mask(locked, "LOCKED").mask(crossed, "CROSSED")
-    signed = (ask - bid).where(positive)
-    bps = 10000 * signed / ((ask + bid) / 2).where(positive)
-    extra = dict(quote_status=status, quote_eligible_main=normal,
-                 quote_eligible_with_locked=normal | locked, quoted_spread_signed=signed,
-                 quoted_spread_bps_main=bps.where(normal),
-                 quoted_spread_bps_with_locked=bps.where(normal | locked))
-    if set(extra) & set(daily.columns):
-        raise ValueError("Input already has analysis columns; supply stock_daily.csv from build")
-    analysis = daily.copy(deep=True).assign(**extra)
-    pd.testing.assert_frame_equal(analysis[daily.columns], daily)
-    sensitivity = analysis.groupby("pilot_ticker", sort=True).agg(
-        total_rows=("quote_status", "size"), normal_rows=("quote_eligible_main", "sum"),
-        locked_rows=("quote_status", lambda s: s.eq("LOCKED").sum()),
-        crossed_rows=("quote_status", lambda s: s.eq("CROSSED").sum()),
-        mean_main_bps=("quoted_spread_bps_main", "mean"),
-        mean_with_locked_bps=("quoted_spread_bps_with_locked", "mean"),
-        median_main_bps=("quoted_spread_bps_main", "median"),
-        median_with_locked_bps=("quoted_spread_bps_with_locked", "median"),
-    ).reset_index()
-    denominator = (sensitivity["normal_rows"] + sensitivity["locked_rows"]).replace(0, float("nan"))
-    sensitivity = sensitivity.assign(
-        locked_share_of_eligible_pct=100 * sensitivity["locked_rows"] / denominator,
-        mean_change_bps=sensitivity["mean_with_locked_bps"] - sensitivity["mean_main_bps"],
-    )
-    return analysis, sensitivity
-
-
-def return_missing(series):
-    value = numeric(series)
-    return value.isna() | value.isin(RETURN_CODES)
-
-
-def return_audit(daily, coverage):
-    ret, retx = return_missing(daily["ret"]), return_missing(daily["retx"])
-    evidence = daily.loc[ret | retx].copy()
-    lookup = coverage.set_index("permno")
-    evidence = evidence.assign(
-        source_first_date=evidence["permno"].map(lookup["first_date"]),
-        source_first_ret=evidence["permno"].map(lookup["first_ret"]),
-        source_first_retx=evidence["permno"].map(lookup["first_retx"]),
-    )
-    matches = pd.to_datetime(evidence["date"]).eq(pd.to_datetime(evidence["source_first_date"]))
-    agrees = ((~ret.loc[evidence.index] | return_missing(evidence["source_first_ret"]))
-              & (~retx.loc[evidence.index] | return_missing(evidence["source_first_retx"])))
-    evidence = evidence.assign(
-        missing_ret=ret.loc[evidence.index], missing_retx=retx.loc[evidence.index],
-        resolution=pd.Series("REVIEW_REQUIRED", index=evidence.index).mask(
-            matches & agrees, "SOURCE_FIRST_OBSERVATION_MISSING"),
-    )
-    return evidence, {"ret_missing_or_code": int(ret.sum()), "retx_missing_or_code": int(retx.sum()),
-                      "missing_both": int((ret & retx).sum()), "same_missing_rows": ret.equals(retx),
-                      "unresolved_rows": int(evidence["resolution"].eq("REVIEW_REQUIRED").sum())}
-
-
-def calendar_audit(daily, pilot, calendar, coverage, start, end):
-    days = pd.DatetimeIndex(pd.to_datetime(calendar["trading_date"])).sort_values()
-    observed = pd.to_datetime(daily["date"])
-    lookup = coverage.set_index("permno")
-    summaries, exceptions = [], []
-    for security in pilot.itertuples(index=False):
-        source = lookup.loc[security.permno]
-        lower = max(pd.Timestamp(start), pd.Timestamp(source["first_date"]))
-        # Keep the requested end, not the local/source last date: trailing gaps stay visible.
-        expected = days[(days >= lower) & (days <= pd.Timestamp(end))]
-        actual = observed[daily["permno"].eq(security.permno)]
-        unique = pd.DatetimeIndex(actual.unique())
-        counts = actual.value_counts()
-        missing, unexpected, duplicates = expected.difference(unique), unique.difference(expected), counts[counts.gt(1)]
-        summaries.append(dict(
-            pilot_ticker=security.pilot_ticker, permno=int(security.permno),
-            coverage_start=lower.strftime("%Y-%m-%d"), coverage_end=end,
-            expected_dates=len(expected), observed_rows=len(actual), observed_unique_dates=len(unique),
-            missing_dates=len(missing), unexpected_dates=len(unexpected), duplicate_dates=len(duplicates),
-            extra_duplicate_rows=int((duplicates - 1).sum()), source_window_rows=int(source["window_rows"]),
-            source_count_matches=int(source["window_rows"]) == len(actual),
-        ))
-        for issue, dates in [("MISSING_DATE", missing), ("UNEXPECTED_DATE", unexpected), ("DUPLICATE_DATE", duplicates.index)]:
-            for date in dates:
-                exceptions.append(dict(pilot_ticker=security.pilot_ticker, permno=int(security.permno),
-                                       date=date.strftime("%Y-%m-%d"), issue=issue,
-                                       observed_rows_on_date=int(counts.get(date, 0))))
-    return pd.DataFrame(summaries), pd.DataFrame(exceptions, columns=[
-        "pilot_ticker", "permno", "date", "issue", "observed_rows_on_date"])
-
-
 def replay_evidence(folder, source_hash, start, end):
     folder = Path(folder)
     record = json.loads((folder / "audit_manifest.json").read_text(encoding="utf-8"))
@@ -245,6 +119,50 @@ def replay_evidence(folder, source_hash, start, end):
     return *frames, {"mode": "replay", "parent_manifest": str((folder / "audit_manifest.json").resolve()),
                      "parent_manifest_sha256": sha256(folder / "audit_manifest.json"),
                      "original_evidence": record["evidence"]}
+
+
+def analyze(daily, pilot, report, raw_manifest, calendar, coverage, start, end):
+    """Compute audit tables and summary in memory, without file writes or a connection."""
+    validate_evidence(calendar, coverage, pilot, start, end)
+    analysis, sensitivity = quote_analysis(daily)
+    returns, return_result = return_audit(daily, coverage)
+    cal_summary, exceptions = calendar_audit(daily, pilot, calendar, coverage, start, end)
+    years = pd.to_datetime(calendar["trading_date"]).dt.year.value_counts().sort_index().rename_axis("year").reset_index(name="trading_days")
+    tables = {"stock_daily_analysis.csv": analysis, "quote_sensitivity.csv": sensitivity,
+              "missing_return_records.csv": returns, "coverage_by_security.csv": cal_summary,
+              "calendar_exceptions.csv": exceptions, "calendar_by_year.csv": years,
+              "trading_calendar.csv": calendar, "source_coverage.csv": coverage}
+    quote_counts = {str(k): int(v) for k, v in analysis["quote_status"].value_counts().items()}
+    calendar_pass = exceptions.empty and bool(cal_summary["source_count_matches"].all())
+    other_core = {k: v for k, v in report["core_flag_counts"].items() if k != "CROSSED_QUOTE" and v}
+    review = not calendar_pass or bool(return_result["unresolved_rows"] or other_core or quote_counts.get("INVALID_OR_MISSING", 0))
+    summary = {
+        "rows": len(daily), "securities": len(pilot), "window": [start, end],
+        "universe_asof": raw_manifest.get("universe_asof"),
+        "quality_status": "review_required" if review else "documented_with_usage_restrictions",
+        "quote_status_counts": quote_counts, "returns": return_result,
+        "calendar_status": "pass" if calendar_pass else "review_required",
+        "calendar_exception_records": len(exceptions),
+        "core_flag_counts": report["core_flag_counts"], "diagnostic_counts": report["diagnostic_counts"],
+        "rules": [
+            "Preserve original columns, row order, missing values and source provenance.",
+            "Main spread: finite positive bid < ask; sensitivity: also positive bid == ask at zero spread.",
+            "Crossed or invalid quotes have missing analytic spreads; never swap quotes or take absolute spreads.",
+            "Quote eligibility is not general row eligibility; preserve other quality and membership flags.",
+            "Missing returns and legacy missing codes are not zero returns; exclude from relevant return statistics.",
+            "Earliest-source missing returns are consistent with no prior price; no IPO or precise cause claim.",
+            "Calendar starts use source MIN(date), capped at requested start; requested end is retained.",
+        ],
+        "limitations": [
+            "Fixed pilot labels are not a survivorship-free historical S&P 500 universe.",
+            "Calendar completeness is relative to crsp.dsi, not an independent exchange calendar.",
+            "Source counts were queried now and can differ after a vendor revision; such differences require review.",
+            "Closing quoted spreads are not executable prices or total transaction costs.",
+            "Crossed-quote causes remain unverified; full-period statistics can hide year effects.",
+            "Older notebook audits are historical snapshots and are not overwritten or newly certified by this run.",
+        ],
+    }
+    return tables, summary
 
 
 def run(root, start, end, run_id=None, evidence_dir=None, connect_factory=None):
@@ -272,15 +190,7 @@ def run(root, start, end, run_id=None, evidence_dir=None, connect_factory=None):
                 calendar, coverage, evidence = fetch_evidence(db, pilot, start, end)
             finally:
                 db.close()
-        validate_evidence(calendar, coverage, pilot, start, end)
-        analysis, sensitivity = quote_analysis(daily)
-        returns, return_result = return_audit(daily, coverage)
-        cal_summary, exceptions = calendar_audit(daily, pilot, calendar, coverage, start, end)
-        years = pd.to_datetime(calendar["trading_date"]).dt.year.value_counts().sort_index().rename_axis("year").reset_index(name="trading_days")
-        tables = {"stock_daily_analysis.csv": analysis, "quote_sensitivity.csv": sensitivity,
-                  "missing_return_records.csv": returns, "coverage_by_security.csv": cal_summary,
-                  "calendar_exceptions.csv": exceptions, "calendar_by_year.csv": years,
-                  "trading_calendar.csv": calendar, "source_coverage.csv": coverage}
+        tables, summary = analyze(daily, pilot, report, raw_manifest, calendar, coverage, start, end)
         outputs = {}
         for name, frame in tables.items():
             path = output / name
@@ -289,36 +199,6 @@ def run(root, start, end, run_id=None, evidence_dir=None, connect_factory=None):
             if len(saved) != len(frame) or saved.columns.tolist() != frame.columns.tolist():
                 raise ValueError(f"Export verification failed: {name}")
             outputs[name] = {"rows": len(frame), "sha256": sha256(path)}
-        quote_counts = {str(k): int(v) for k, v in analysis["quote_status"].value_counts().items()}
-        calendar_pass = exceptions.empty and bool(cal_summary["source_count_matches"].all())
-        other_core = {k: v for k, v in report["core_flag_counts"].items() if k != "CROSSED_QUOTE" and v}
-        review = not calendar_pass or bool(return_result["unresolved_rows"] or other_core or quote_counts.get("INVALID_OR_MISSING", 0))
-        summary = {
-            "rows": len(daily), "securities": len(pilot), "window": [start, end],
-            "universe_asof": raw_manifest.get("universe_asof"),
-            "quality_status": "review_required" if review else "documented_with_usage_restrictions",
-            "quote_status_counts": quote_counts, "returns": return_result,
-            "calendar_status": "pass" if calendar_pass else "review_required",
-            "calendar_exception_records": len(exceptions),
-            "core_flag_counts": report["core_flag_counts"], "diagnostic_counts": report["diagnostic_counts"],
-            "rules": [
-                "Preserve original columns, row order, missing values and source provenance.",
-                "Main spread: finite positive bid < ask; sensitivity: also positive bid == ask at zero spread.",
-                "Crossed or invalid quotes have missing analytic spreads; never swap quotes or take absolute spreads.",
-                "Quote eligibility is not general row eligibility; preserve other quality and membership flags.",
-                "Missing returns and legacy missing codes are not zero returns; exclude from relevant return statistics.",
-                "Earliest-source missing returns are consistent with no prior price; no IPO or precise cause claim.",
-                "Calendar starts use source MIN(date), capped at requested start; requested end is retained.",
-            ],
-            "limitations": [
-                "Fixed pilot labels are not a survivorship-free historical S&P 500 universe.",
-                "Calendar completeness is relative to crsp.dsi, not an independent exchange calendar.",
-                "Source counts were queried now and can differ after a vendor revision; such differences require review.",
-                "Closing quoted spreads are not executable prices or total transaction costs.",
-                "Crossed-quote causes remain unverified; full-period statistics can hide year effects.",
-                "Older notebook audits are historical snapshots and are not overwritten or newly certified by this run.",
-            ],
-        }
         write_json(output / "quality_summary.json", summary)
         outputs["quality_summary.json"] = {"sha256": sha256(output / "quality_summary.json")}
         unchanged(protected)
@@ -337,6 +217,70 @@ def run(root, start, end, run_id=None, evidence_dir=None, connect_factory=None):
         raise
 
 
+def check_saved(root, start, end, evidence_dir=None):
+    """Read-only validation; optionally compare a completed audit with recomputed tables.
+
+    This function never calls run(), build(), pull() or a connection factory.
+    It returns counts/status only, and verifies that no saved file was changed,
+    added or removed while checking. All analytical calculations stay in memory.
+    """
+    start, end = window(start, end)
+    processed = Path(root) / "processed" / "stocks" / f"{start}_{end}"
+    raw = raw_folder(root, start, end)
+    before_raw, before_processed = file_hashes(raw), file_hashes(processed)
+    try:
+        processed, daily, pilot, report, raw_manifest = load_inputs(root, start, end)
+        result = {
+            "input_check": "pass", "rows": len(daily), "securities": len(pilot),
+            "window": [start, end], "evidence_check": "not_requested",
+            "connection_opened": False, "files_written": False,
+        }
+        if evidence_dir is not None:
+            evidence_dir = Path(evidence_dir).resolve()
+            # A history check must use evidence from this exact preserved window.
+            audit_root = (processed / "repro_audits").resolve()
+            if not evidence_dir.is_relative_to(audit_root) or evidence_dir == audit_root:
+                raise ValueError("Evidence must be a completed run inside this window's repro_audits")
+            calendar, coverage, _ = replay_evidence(
+                evidence_dir, sha256(processed / "stock_daily.csv"), start, end,
+            )
+            tables, summary = analyze(
+                daily, pilot, report, raw_manifest, calendar, coverage, start, end,
+            )
+            manifest = json.loads((evidence_dir / "audit_manifest.json").read_text(encoding="utf-8"))
+            if manifest.get("raw_manifest_sha256") != report["raw_manifest_sha256"]:
+                raise ValueError("Saved audit belongs to a different raw manifest")
+            expected_files = set(tables) | {"quality_summary.json"}
+            if set(manifest["outputs"]) != expected_files:
+                raise ValueError("Unexpected saved audit output file set")
+            for name in sorted(expected_files):
+                if sha256(evidence_dir / name) != manifest["outputs"][name]["sha256"]:
+                    raise ValueError(f"Saved audit output hash mismatch: {name}")
+            for name, frame in tables.items():
+                # Compare like-for-like CSV representations without writing a file.
+                expected = pd.read_csv(StringIO(frame.to_csv(index=False)))
+                saved = pd.read_csv(evidence_dir / name)
+                pd.testing.assert_frame_equal(
+                    saved, expected, check_dtype=False, check_exact=False,
+                    rtol=1e-12, atol=1e-12,
+                )
+                if manifest["outputs"][name]["rows"] != len(frame):
+                    raise ValueError(f"Saved audit row count mismatch: {name}")
+            saved_summary = json.loads((evidence_dir / "quality_summary.json").read_text(encoding="utf-8"))
+            if saved_summary != summary:
+                raise ValueError("Saved audit quality summary differs from recalculation")
+            result.update(
+                evidence_check="pass", csv_tables_compared=len(tables),
+                quality_status=summary["quality_status"],
+                calendar_status=summary["calendar_status"],
+            )
+    finally:
+        if before_raw != file_hashes(raw) or before_processed != file_hashes(processed):
+            raise ValueError("Saved input or audit files changed during read-only checking")
+    result["saved_files_unchanged"] = True
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", required=True)
@@ -344,18 +288,16 @@ def main():
     parser.add_argument("--end", required=True)
     parser.add_argument("--run-id", help="New directory name; default: UTC timestamp plus random suffix")
     parser.add_argument("--evidence-dir", help="Completed scripted run to replay; no WRDS connection")
-    parser.add_argument("--check-only", action="store_true", help="Offline input validation only; no writes or connection")
+    parser.add_argument("--check-only", action="store_true", help="Read-only input validation; with --evidence-dir also compare the completed audit")
     parser.add_argument("--quiet-known-pandas-warning", action="store_true", help="Only suppress the known pandas 2.2.3/Python 3.14 assignment warning")
     args = parser.parse_args()
     if args.quiet_known_pandas_warning and platform.python_version_tuple()[:2] == ("3", "14") and pd.__version__ == "2.2.3":
         warnings.filterwarnings("ignore", message=r"^ChainedAssignmentError: behaviour will change in pandas 3\.0!",
-                                category=FutureWarning, module=r"^(__main__|pandas\.core\.reshape\.merge|src\.stocks\.(quality|history_audit))$")
+                                category=FutureWarning, module=r"^(__main__|pandas\.core\.reshape\.merge|src\.stocks\.(quality|history_audit|history_checks|raw_inputs))$")
     start, end = window(args.start, args.end)
     root = data_root(args.data_root)
     if args.check_only:
-        _, daily, pilot, _, _ = load_inputs(root, start, end)
-        print(json.dumps({"input_check": "pass", "rows": len(daily), "securities": len(pilot),
-                          "connection_opened": False, "files_written": False}, indent=2))
+        print(json.dumps(check_saved(root, start, end, args.evidence_dir), indent=2))
         return
     output, summary = run(root, start, end, args.run_id, args.evidence_dir)
     print(json.dumps({"output": str(output), **summary}, indent=2))
