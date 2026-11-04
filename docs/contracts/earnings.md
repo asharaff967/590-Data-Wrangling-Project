@@ -40,6 +40,22 @@ Join keys: `ticker`, `cik`, `filing_date`.
 | items | 8K item numbers |
 | url | Link to the primary document |
 
+## edgar_releases.csv
+
+Owner: Xueyun. Code: `src/earnings/releases.py` (`make earnings-releases`). One row per row of `edgar_earnings_8k.csv`, none dropped. The press release text for the LLM step.
+
+Join key: `accession`.
+
+| Column | Meaning |
+| --- | --- |
+| ticker, cik, accession, filing_date, accepted_et, edgar_timing | Copied from edgar_earnings_8k.csv |
+| exhibit_type | EDGAR type of the exhibit we used, normally EX-99.1. Empty when none was found. |
+| exhibit_url | Link to that exhibit |
+| status | ex99_1 (found EX-99.1), other_ex99 (no EX-99.1, used the first other EX-99, check by hand), no_ex99 (filing has no EX-99 exhibit), fetch_error (SEC request failed) |
+| n_chars | Length of the plain text |
+| text_path | Plain text of the release, relative to the repo root: `data/processed/earnings/releases_text/<accession>.txt` |
+| error | The SEC error message for fetch_error rows |
+
 ## Planned
 
 `earnings_events.csv`: the final cleaned table, one row per company and earnings event, with the announcement date and before open or after close flag verified by the LLM press release step and the hand validated sample. Target for the Oct 21 checkpoint.
