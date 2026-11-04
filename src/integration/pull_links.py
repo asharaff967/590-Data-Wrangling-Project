@@ -44,7 +44,7 @@ def pull_links(db, tickers: list[str], force: bool) -> None:
     if gvkeys:
         # gvkey is a string, so quote the values directly. They are digits only.
         quoted = "(" + ",".join(f"'{g}'" for g in gvkeys if g.isdigit()) + ")"
-        co_sql = f"select gvkey, cik, tic, conm from comp.company where gvkey in {quoted}"
+        co_sql = f"select gvkey, cik, conm from comp.company where gvkey in {quoted}"
         co = db.raw_sql(co_sql)
         print(f"Compustat company rows: {len(co)}")
         save_raw(co, "comp_company_pilot", AREA, co_sql, force)
